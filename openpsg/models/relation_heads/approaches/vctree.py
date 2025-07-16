@@ -108,8 +108,11 @@ class VCTreeLSTMContext(nn.Module):
 
         self.use_gt_box = self.cfg.use_gt_box
         self.use_gt_label = self.cfg.use_gt_label
+        self.use_pred = self.cfg.use_pred
 
         # mode
+        if self.use_pred:
+            self.mode = 'predcls'
         if self.cfg.use_gt_box:
             if self.cfg.use_gt_label:
                 self.mode = 'predcls'
@@ -283,12 +286,12 @@ class VCTreeLSTMContext(nn.Module):
     def forward(self, x, det_result, all_average=False, ctx_average=False):
         num_objs = [len(b) for b in det_result.bboxes]
         # labels will be used in DecoderRNN during training (for nms)
-        if self.training or self.cfg.use_gt_box:
+        if self.training or self.cfg.use_gt_box or self.use_pred:
             obj_labels = torch.cat(det_result.labels)
         else:
             obj_labels = None
 
-        if self.cfg.use_gt_label:
+        if self.cfg.use_gt_label or self.use_pred:
             obj_embed = self.obj_embed1(obj_labels.long())
             obj_dists = F.softmax(to_onehot(obj_labels, self.num_obj_classes))
         else:

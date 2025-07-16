@@ -49,6 +49,7 @@ class RelationHead(BaseModule):
         self.head_config = head_config
         self.use_gt_box = self.head_config.use_gt_box
         self.use_gt_label = self.head_config.use_gt_label
+        self.use_pred = self.head_config.use_pred
         self.with_visual_bbox = (bbox_roi_extractor is not None
                                  and bbox_roi_extractor.with_visual_bbox) or (
                                      relation_roi_extractor is not None and
@@ -64,13 +65,16 @@ class RelationHead(BaseModule):
 
         self.dataset_config = dataset_config
 
-        if self.use_gt_box:
+        if self.use_pred:
+            self.mode = 'predcls'
+        elif self.use_gt_box:
             if self.use_gt_label:
                 self.mode = 'predcls'
             else:
                 self.mode = 'sgcls'
         else:
             self.mode = 'sgdet'
+
         if bbox_roi_extractor is not None:
             self.bbox_roi_extractor = builder.build_roi_extractor(
                 bbox_roi_extractor)
@@ -78,7 +82,7 @@ class RelationHead(BaseModule):
             self.relation_roi_extractor = builder.build_roi_extractor(
                 relation_roi_extractor)
         if relation_sampler is not None:
-            relation_sampler.update(dict(use_gt_box=self.use_gt_box))
+            relation_sampler.update(dict(use_gt_box=self.use_gt_box or self.use_pred))
             self.relation_sampler = RelationSampler(**relation_sampler)
 
         self.post_processor = PostProcessor()

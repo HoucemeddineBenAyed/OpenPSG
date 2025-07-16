@@ -338,9 +338,13 @@ class SceneGraphPanopticFPN(PanopticFPN):
         gt_bboxes,
         gt_labels,
         gt_masks,
+        pred_bboxes=None,
+        pred_labels=None,
+        pred_masks=None,
         proposals=None,
         use_gt_box=False,
         use_gt_label=False,
+        use_pred=False,
         rescale=False,
         is_testing=False,
     ):
@@ -370,6 +374,11 @@ class SceneGraphPanopticFPN(PanopticFPN):
             target_labels = gt_labels
             pan_seg_masks = gt_masks
             return gt_bboxes, gt_labels, target_labels, None, gt_masks, None, None
+
+        elif use_pred:  # predcls
+            target_labels = pred_labels
+            pan_seg_masks = pred_masks
+            return pred_bboxes, pred_labels, target_labels, None, pan_seg_masks, None, None
 
         # NOTE: Sgcls should not be performed
         elif use_gt_box and not use_gt_label:  # sgcls
@@ -562,6 +571,9 @@ class SceneGraphPanopticFPN(PanopticFPN):
         gt_rels=None,
         gt_masks=None,
         gt_scenes=None,
+        pred_bboxes=None,
+        pred_labels=None,
+        pred_masks=None,
         rescale=False,
         ignore_classes=None,
         key_first=False,
@@ -594,6 +606,12 @@ class SceneGraphPanopticFPN(PanopticFPN):
             gt_labels = gt_labels[0]
         if gt_masks is not None:
             gt_masks = gt_masks[0]
+        if pred_bboxes is not None:
+            pred_bboxes = pred_bboxes[0]
+        if pred_labels is not None:
+            pred_labels = pred_labels[0]
+        if pred_masks is not None:
+            pred_masks = pred_masks[0]
 
         x = self.extract_feat(img)
         """
@@ -602,7 +620,11 @@ class SceneGraphPanopticFPN(PanopticFPN):
         """
 
         # NOTE: Change to 1-index here:
-        gt_labels = [label + 1 for label in gt_labels]
+        if gt_labels is not None:
+            gt_labels = [label + 1 for label in gt_labels]
+
+        if pred_labels is not None:
+            pred_labels = [label + 1 for label in pred_labels]
 
         # Rescale should be forbidden here since the bboxes and masks will
         # be used in relation module.
@@ -613,8 +635,12 @@ class SceneGraphPanopticFPN(PanopticFPN):
             gt_bboxes,
             gt_labels,
             gt_masks,
+            pred_bboxes=pred_bboxes,
+            pred_labels=pred_labels,
+            pred_masks=pred_masks,
             use_gt_box=self.relation_head.use_gt_box,
             use_gt_label=self.relation_head.use_gt_label,
+            use_pred=self.relation_head.use_pred,
             rescale=False,
             is_testing=True,
         )
