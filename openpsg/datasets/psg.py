@@ -32,6 +32,7 @@ class PanopticSceneGraphDataset(CocoPanopticDataset):
             # New args
             split: str = 'train',  # {"train", "test"}
             all_bboxes: bool = False,  # load all bboxes (thing, stuff) for SG
+            use_predictions: bool = False,  # use proposals for SG
     ):
         self.ann_file = ann_file
         self.data_root = data_root
@@ -41,6 +42,7 @@ class PanopticSceneGraphDataset(CocoPanopticDataset):
         self.test_mode = test_mode
         self.filter_empty_gt = filter_empty_gt
         self.file_client = mmcv.FileClient(**file_client_args)
+        self.use_predictions = use_predictions
 
         # join paths if data_root is specified
         if self.data_root is not None:
@@ -193,6 +195,8 @@ class PanopticSceneGraphDataset(CocoPanopticDataset):
         # Process bbox annotations
         gt_bboxes_ignore = np.zeros((0, 4), dtype=np.float32)
 
+        gt_bboxes = []
+        gt_labels = []
         if self.all_bboxes:
             # NOTE: Get all the bbox annotations (thing + stuff)
             gt_bboxes = np.array([a['bbox'] for a in d['annotations']],
@@ -200,10 +204,14 @@ class PanopticSceneGraphDataset(CocoPanopticDataset):
             gt_labels = np.array([a['category_id'] for a in d['annotations']],
                                  dtype=np.int64)
 
+        pred_bboxes = []
+        pred_labels = []
+        if self.use_predictions:
+            pred_bboxes = np.array([a['bbox'] for a in d['pred_annotations']],
+                                   dtype=np.float32)
+            pred_labels = np.array([a['category_id'] for a in d['pred_annotations']],
+                                   dtype=np.int64)
         else:
-            gt_bboxes = []
-            gt_labels = []
-
             # FIXME: Do we have to filter out `is_crowd`?
             # Do not train on `is_crowd`,
             # i.e just follow the mmdet dataset classes
@@ -232,6 +240,17 @@ class PanopticSceneGraphDataset(CocoPanopticDataset):
                 'category': s['category_id'],
                 'is_thing': s['isthing']
             })
+
+        pred_mask_infos = []
+        pred_panoptic_seg = None
+        if self.use_predictions:
+            for s in d['pred_segments_info']:
+                pred_mask_infos.append({
+                    'id': s['id'],
+                    'category': s['category_id'],
+                    'is_thing': s['isthing']
+                })
+            pred_panoptic_seg = np.array(d['pred_panoptic_seg'], dtype=np.int32)
 
         # Process relationship annotations
         gt_rels = d['relations'].copy()
@@ -274,7 +293,14 @@ class PanopticSceneGraphDataset(CocoPanopticDataset):
             bboxes_ignore=gt_bboxes_ignore,
             masks=gt_mask_infos,
             seg_map=d['pan_seg_file_name'],
+            img_id=d['image_id'],
         )
+
+        if self.use_predictions:
+            ann['pred_bboxes'] = pred_bboxes
+            ann['pred_labels'] = pred_labels
+            ann['pred_masks'] = pred_mask_infos
+            ann['pred_panoptic_seg'] = pred_panoptic_seg
 
         return ann
 
@@ -283,6 +309,7 @@ class PanopticSceneGraphDataset(CocoPanopticDataset):
         super().pre_pipeline(results)
 
         results['rel_fields'] = []
+        results['img_id'] = results['ann_info']['img_id']
 
     def prepare_test_img(self, idx):
         # For SGG, since the forward process may need gt_bboxes/gt_labels,
