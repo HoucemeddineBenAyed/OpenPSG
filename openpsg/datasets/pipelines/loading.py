@@ -86,6 +86,7 @@ class LoadPanopticSceneGraphAnnotations(LoadPanopticAnnotations):
             file_client_args=dict(backend='disk'),
             # New args
             with_rel=False,
+            with_pred=False,
     ):
         super().__init__(
             with_bbox=with_bbox,
@@ -95,6 +96,7 @@ class LoadPanopticSceneGraphAnnotations(LoadPanopticAnnotations):
             file_client_args=dict(backend='disk'),
         )
         self.with_rel = with_rel
+        self.with_pred = with_pred
 
     def _load_rels(self, results):
         ann_info = results['ann_info']
@@ -104,6 +106,22 @@ class LoadPanopticSceneGraphAnnotations(LoadPanopticAnnotations):
         assert 'rel_fields' in results
 
         results['rel_fields'] += ['gt_rels', 'gt_relmaps']
+        return results
+
+    def _load_bboxes(self, results):
+        results = super()._load_bboxes(results)
+        if self.with_pred:
+            # Load predicted bboxes if available
+            ann_info = results['ann_info']
+
+            results['pred_bboxes'] = ann_info['pred_bboxes'].copy()
+            results['bbox_fields'].append('pred_bboxes')
+        return results
+
+    def _load_labels(self, results):
+        results = super()._load_labels(results)
+        if self.with_pred:
+            results['pred_labels'] = results['ann_info']['pred_labels'].copy()
         return results
 
     def _load_masks_and_semantic_segs(self, results):
@@ -144,6 +162,15 @@ class LoadPanopticSceneGraphAnnotations(LoadPanopticAnnotations):
             #     gt_masks.append(mask.astype(np.uint8))
             gt_masks.append(mask.astype(np.uint8))  # get all masks
 
+        pred_masks = []
+        pred_panoptic_seg = results['ann_info'].get('pred_panoptic_seg', None)
+        pred_seg = np.zeros_like(pan_png) + 255
+
+        for mask_info in results['ann_info'].get('pred_masks', []):
+            mask = (pred_panoptic_seg == mask_info['id'])
+            pred_seg = np.where(mask, mask_info['category'], pred_seg)
+            pred_masks.append(mask.astype(np.uint8))
+
         if self.with_mask:
             h, w = results['img_info']['height'], results['img_info']['width']
             gt_masks = BitmapMasks(gt_masks, h, w)
@@ -152,9 +179,19 @@ class LoadPanopticSceneGraphAnnotations(LoadPanopticAnnotations):
             results['gt_masks'] = gt_masks
             results['mask_fields'].append('gt_masks')
 
+            if self.with_pred and pred_masks:
+                pred_masks = BitmapMasks(pred_masks, h, w)
+                results['pred_masks'] = pred_masks
+                results['mask_fields'].append('pred_masks')
+
         if self.with_seg:
             results['gt_semantic_seg'] = gt_seg
             results['seg_fields'].append('gt_semantic_seg')
+
+            if self.with_pred and pred_seg is not None:
+                results['pred_semantic_seg'] = pred_seg
+                results['seg_fields'].append('pred_semantic_seg')
+
         return results
 
     def __call__(self, results):
