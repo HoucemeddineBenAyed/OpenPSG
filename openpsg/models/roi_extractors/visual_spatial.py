@@ -20,6 +20,7 @@ from torch.nn.modules.utils import _pair
 
 from openpsg.models.relation_heads.approaches import PointNetFeat
 from openpsg.utils.utils import enumerate_by_image
+import torch.nn.functional as F
 
 
 @ROI_EXTRACTORS.register_module()
@@ -240,16 +241,57 @@ class VisualSpatialExtractor(BaseModule):
         new_rois = torch.stack((rois[:, 0], x1, y1, x2, y2), dim=-1)
         return new_rois
 
+    @staticmethod
+    def apply_masks_to_roi_feats(roi_layer, feats, rois, masks):
+        """Apply masks to ROI features for FPN setup"""
+        # Standard RoiAlign
+        roi_feats = roi_layer(feats, rois)  # Shape: (N, 256, 7, 7)
+
+        # Convert masks to tensors if needed
+        if isinstance(masks[0], np.ndarray):
+            mask_tensors = [torch.from_numpy(mask).float().to(feats.device) for mask in masks]
+        else:
+            mask_tensors = masks
+
+        # Process each ROI's mask
+        masked_roi_feats = []
+        for i, (roi, mask) in enumerate(zip(rois, mask_tensors)):
+            # Extract ROI coordinates (skip batch index)
+            x1, y1, x2, y2 = roi[1:5]
+
+            # Extract ROI region from original mask
+            x1_orig = min(int(x1.item()), int(x2.item()))
+            y1_orig = min(int(y1.item()), int(y2.item()))
+            x2_orig = max(int(x1.item()), int(x2.item()))
+            y2_orig = max(int(y1.item()), int(y2.item()))
+
+            roi_mask = mask[y1_orig:y2_orig, x1_orig:x2_orig]
+
+            # Resize mask to match roi_feats output size (7x7)
+            roi_mask_resized = F.interpolate(
+                roi_mask.unsqueeze(0).unsqueeze(0),  # Add batch and channel dims
+                size=(7, 7),
+                mode='bilinear',
+                align_corners=False
+            ).squeeze(0).squeeze(0)
+
+            # Apply mask to the ROI features
+            masked_roi_feat = roi_feats[i] * roi_mask_resized.unsqueeze(0)  # Broadcast across channels
+            masked_roi_feats.append(masked_roi_feat)
+
+        return torch.stack(masked_roi_feats)
+
     def roi_forward(self,
                     roi_layers,
                     feats,
                     rois,
                     masks=None,
-                    roi_scale_factor=None):
+                    roi_scale_factor=None,
+                    with_masks=False):
         if len(feats) == 1:
-            if roi_layers[0].__class__.__name__ == 'ShapeAwareRoIAlign':
+            if with_masks:
                 assert masks is not None
-                roi_feats = roi_layers[0](feats[0], rois, masks)
+                roi_feats = self.apply_masks_to_roi_feats(roi_layers[0], feats[0], rois, masks)
             else:
                 roi_feats = roi_layers[0](feats[0], rois)
         else:
@@ -266,12 +308,11 @@ class VisualSpatialExtractor(BaseModule):
                 inds = target_lvls == i
                 if inds.any():
                     rois_ = rois[inds, :]
-                    if roi_layers[
-                            i].__class__.__name__ == 'ShapeAwareRoIAlign':
+                    if with_masks:
                         masks_ = [
                             masks[idx] for idx in torch.nonzero(inds).view(-1)
                         ]
-                        roi_feats_t = roi_layers[i](feats[i], rois_, masks_)
+                        roi_feats_t = self.apply_masks_to_roi_feats(roi_layers[i], feats[i], rois_, masks_)
                     else:
                         roi_feats_t = roi_layers[i](feats[i], rois_)
                     roi_feats[inds] = roi_feats_t
@@ -290,7 +331,7 @@ class VisualSpatialExtractor(BaseModule):
                                               rois, masks, roi_scale_factor)
         if self.with_visual_mask:
             roi_feats_mask = self.roi_forward(self.mask_roi_layers, feats,
-                                              rois, masks, roi_scale_factor)
+                                              rois, masks, roi_scale_factor, with_masks=True)
         if self.with_visual_point:
             # input: (N_entity, Ndim(2), N_point)
             # output: (N_entity, feat_dim(1024))
@@ -420,7 +461,7 @@ class VisualSpatialExtractor(BaseModule):
         if self.with_visual_mask:
             roi_feats_mask = self.roi_forward(self.mask_roi_layers, feats,
                                               union_rois, union_masks,
-                                              roi_scale_factor)
+                                              roi_scale_factor, with_masks=True)
         if self.with_visual_point:
             roi_feats_point, trans_matrix, _ = self.pointFeatExtractor(
                 torch.stack(union_points, dim=0).transpose(2, 1))
