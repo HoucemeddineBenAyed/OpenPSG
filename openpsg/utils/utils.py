@@ -10,6 +10,7 @@ from detectron2.utils.visualizer import VisImage, Visualizer
 from mmdet.datasets.coco_panoptic import INSTANCE_OFFSET
 import matplotlib.pyplot as plt
 
+
 # from mmcv.ops.nms import batched_nms
 
 
@@ -38,15 +39,15 @@ def adjust_text_color(color: Tuple[float, float, float],
 
 
 def draw_text(
-    viz_img: VisImage = None,
-    text: str = None,
-    x: float = None,
-    y: float = None,
-    color: Tuple[float, float, float] = [0, 0, 0],
-    size: float = 10,
-    padding: float = 5,
-    box_color: str = 'black',
-    font: str = None,
+        viz_img: VisImage = None,
+        text: str = None,
+        x: float = None,
+        y: float = None,
+        color: Tuple[float, float, float] = [0, 0, 0],
+        size: float = 10,
+        padding: float = 5,
+        box_color: str = 'black',
+        font: str = None,
 ) -> float:
     text_obj = viz_img.ax.text(
         x,
@@ -73,13 +74,13 @@ def draw_text(
 
 
 def multiclass_nms_alt(
-    multi_bboxes,
-    multi_scores,
-    score_thr,
-    nms_cfg,
-    max_num=-1,
-    score_factors=None,
-    return_dist=False,
+        multi_bboxes,
+        multi_scores,
+        score_thr,
+        nms_cfg,
+        max_num=-1,
+        score_factors=None,
+        return_dist=False,
 ):
     """NMS for multi-class bboxes.
 
@@ -125,7 +126,7 @@ def multiclass_nms_alt(
 
     if bboxes.numel() == 0:
         bboxes = multi_bboxes.new_zeros((0, 5))
-        labels = multi_bboxes.new_zeros((0, ), dtype=torch.long)
+        labels = multi_bboxes.new_zeros((0,), dtype=torch.long)
         if return_dist:
             return bboxes, (labels, multi_bboxes.new_zeros(
                 (0, num_classes + 1)))
@@ -164,6 +165,7 @@ def multiclass_nms_alt(
                          1), (labels.view(-1), score_dists)
     else:
         return torch.cat([bboxes, scores[:, None]], 1), labels.view(-1)
+
 
 CLASSES = [
     'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train',
@@ -262,50 +264,59 @@ def show_result(img,
     img = mmcv.imread(img)
     img = img.copy()  # (H, W, 3)
     img_h, img_w = img.shape[:-1]
-    
+
     # Decrease contrast
     img = PIL.Image.fromarray(img)
     converter = PIL.ImageEnhance.Color(img)
     img = converter.enhance(0.01)
     if out_file is not None:
-        mmcv.imwrite(np.asarray(img), 'bw'+out_file)
+        mmcv.imwrite(np.asarray(img), 'bw' + out_file)
 
-    # Draw masks
-    pan_results = result.pan_results
+    if is_one_stage:
+        rel_obj_labels = result.labels
+        rel_obj_labels = [CLASSES[l - 1] for l in rel_obj_labels]
+        masks = result.masks
+        masks = np.array([mmcv.imresize(mask, (img_w, img_h)) for mask in masks])
+        # Choose colors for each instance in coco
+        colormap_coco = get_colormap(len(masks))
+    else:
+        # Draw masks
+        pan_results = result.masks
 
-    ids = np.unique(pan_results)[::-1]
-    num_classes = 133
-    legal_indices = (ids != num_classes)  # for VOID label
-    ids = ids[legal_indices]
+        ids = np.unique(pan_results)[::-1]
+        num_classes = 133
+        legal_indices = (ids != num_classes)  # for VOID label
+        ids = ids[legal_indices]
 
-    # Get predicted labels
-    labels = np.array([id % INSTANCE_OFFSET for id in ids], dtype=np.int64)
-    labels = [CLASSES[l] for l in labels]
-
-    #For psgtr
-    rel_obj_labels = result.labels
-    rel_obj_labels = [CLASSES[l - 1] for l in rel_obj_labels]
-
-    # (N_m, H, W)
-    segms = pan_results[None] == ids[:, None, None]
-    # Resize predicted masks
-    segms = [
-        mmcv.image.imresize(m.astype(float), (img_w, img_h)) for m in segms
-    ]
-    # One stage segmentation
-    masks = result.masks
+        # Get predicted labels
+        labels = np.array([id % INSTANCE_OFFSET for id in ids], dtype=np.int64)
+        labels = [CLASSES[l] for l in labels]
+        # (N_m, H, W)
+        segms = pan_results[None] == ids[:, None, None]
+        # Resize predicted masks
+        segms = [
+            mmcv.image.imresize(m.astype(float), (img_h, img_w)) for m in segms
+        ]
+        colormap_coco = get_colormap(len(segms))
 
     # Choose colors for each instance in coco
-    colormap_coco = get_colormap(len(masks)) if is_one_stage else get_colormap(len(segms))
     colormap_coco = (np.array(colormap_coco) / 255).tolist()
 
     # Viualize masks
     viz = Visualizer(img)
-    viz.overlay_instances(
-        labels=rel_obj_labels if is_one_stage else labels,
-        masks=masks if is_one_stage else segms,
-        assigned_colors=colormap_coco,
-    )
+    if is_one_stage:
+        # For one-stage models, we use the labels directly
+        viz.overlay_instances(
+            labels=rel_obj_labels,
+            masks=masks,
+            assigned_colors=colormap_coco,
+        )
+    else:
+        viz.overlay_instances(
+            labels=labels,
+            masks=segms,
+            assigned_colors=colormap_coco,
+        )
     viz_img = viz.get_output().get_image()
     if out_file is not None:
         mmcv.imwrite(viz_img, out_file)
@@ -326,7 +337,7 @@ def show_result(img,
     relations = np.concatenate(
         [rel_pair_idxes_topk, rel_labels_topk[..., None]], axis=1)
     n_rels = len(relations)
-    
+
     top_padding = 20
     bottom_padding = 20
     left_padding = 20
@@ -339,11 +350,11 @@ def show_result(img,
     width = img_w
     curr_x = left_padding
     curr_y = top_padding
-    
+
     # # Adjust colormaps
     # colormap_coco = [adjust_text_color(c, viz) for c in colormap_coco]
     viz_graph = VisImage(np.full((height, width, 3), 255))
-    
+
     for i, r in enumerate(relations):
         s_idx, o_idx, rel_id = r
         s_label = rel_obj_labels[s_idx]
@@ -405,9 +416,8 @@ def show_result(img,
     # if out_file is not None:
     #     mmcv.imwrite(output_viz_graph, out_file)
 
-    if not (show or out_file):
-        return viz_final
-
+    # if not (show or out_file):
+    #     return viz_final
 
 # def multiclass_nms_alt(
 #     multi_bboxes,
