@@ -192,6 +192,14 @@ class PanopticSceneGraphDataset(CocoPanopticDataset):
     def get_ann_info(self, idx):
         d = self.data[idx]
 
+        pred_bboxes = []
+        pred_labels = []
+        if self.use_predictions:
+            pred_bboxes = np.array([a['bbox'] for a in d['pred_annotations']],
+                                   dtype=np.float32)
+            pred_labels = np.array([a['category_id'] for a in d['pred_annotations']],
+                                   dtype=np.int64)
+
         # Process bbox annotations
         gt_bboxes_ignore = np.zeros((0, 4), dtype=np.float32)
 
@@ -204,13 +212,6 @@ class PanopticSceneGraphDataset(CocoPanopticDataset):
             gt_labels = np.array([a['category_id'] for a in d['annotations']],
                                  dtype=np.int64)
 
-        pred_bboxes = []
-        pred_labels = []
-        if self.use_predictions:
-            pred_bboxes = np.array([a['bbox'] for a in d['pred_annotations']],
-                                   dtype=np.float32)
-            pred_labels = np.array([a['category_id'] for a in d['pred_annotations']],
-                                   dtype=np.int64)
         else:
             # FIXME: Do we have to filter out `is_crowd`?
             # Do not train on `is_crowd`,
